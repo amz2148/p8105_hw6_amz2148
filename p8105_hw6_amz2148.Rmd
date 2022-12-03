@@ -29,6 +29,8 @@ theme_set(theme_minimal() + theme(legend.position = "bottom")) #sets default fig
 
 # Problem 2
 
+First we import the `homicides` dataset from the Washington Post (originally called `homicide_data.csv`). We also change all unknown values to NA for consistency as some (but not all) variables are already coded this way.
+
 ```{r load_homicides}
 homicides = 
   read_csv("data/homicide_data.csv") %>% #loads csv file
@@ -36,28 +38,61 @@ homicides =
   gdata::unknownToNA("Unknown", warning = FALSE) #changes all "unknown" values to "NA"
 ```
 
-Next, we create a `city_state` variable (e.g. “Baltimore, MD”), and a binary variable indicating whether the homicide is solved. Omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. Also omit Tulsa, AL – this is a data entry mistake. For this problem, limit your analysis those for whom victim_race is white or black. Be sure that victim_age is numeric.
+Next, we create a `city_state` variable (e.g. “Baltimore, MD”) and a binary `status` variable indicating whether the homicide is solved. We omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. We also omit Tulsa, AL – this is a data entry mistake. For this problem, we limit our analysis to those for whom `victim_race` is white or black. We also convert `victim_age` to numeric form.
 
 ```{r citystate}
 homicides = 
   homicides %>% 
-  mutate(state = replace(state, state == "AL", "OK")) %>% #fixes values erroneously labeled AL
   mutate(state = replace(state, state == "wI", "WI")) %>% #fixes values erroneously labeled wI
   mutate(city_state = paste(city, state, sep = ", ")) %>% #creates city_state variable
-  group_by(city_state) %>% #groups by city_state
-  summarize(n_unsolved = sum(disposition == 'Closed without arrest' | disposition == 'Open/No arrest'), n_total = n()) #creates new variables for total homicides and total unsolved homicides
+  mutate(status = case_when(disposition == "Closed without arrest" | disposition == "Open/No arrest" ~ "Unresolved", disposition == "Closed by arrest" ~ "Resolved")) %>% #creates binary status variable
+  filter(city_state != "Dallas, TX", city_state != "Phoenix, AZ", city_state != "Kansas City, MO", city_state != "Tulsa, AL") %>% #omits specified cities
+  filter(victim_race == "White" | victim_race == "Black") %>% #limits analyses to only White and Black victims
+mutate(
+    statusdbl = as.numeric(status == "Resolved"), #creates numeric, binary status variable where resolved = 1, unresolved = 0
+    victim_age = as.numeric(victim_age), #reclassifies age as numeric variable
+    victim_racedbl = as.numeric(victim_race == "White"), #creates numeric race variable where White = 1, Black = 0
+    victim_sexdbl = as.numeric(victim_sex == "Female")) #creates numeric sex variable where Female = 1, Male = 0
 
-homicides_table = 
+head(homicides) #outputs first few rows of dataset
+```
+
+For the city of Baltimore, MD, we use the `glm` function to fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. We save the output of `glm` as an R object; apply `broom::tidy` to this object; and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing male victims to female victims, keeping all other variables fixed.
+
+```{r baltimore}
+baltimore_logistic = 
   homicides %>% 
-  knitr::kable(digits = 4) #creates table
+  filter(city_state == "Baltimore, MD") %>% #restricts dataset to Baltimore, MD
+  glm(statusdbl ~ victim_age + victim_sexdbl + victim_racedbl, data = ., family = binomial()) #runs logistic regression with outcome of status and covariates of age, sex, and race
 
-homicides_table #outputs table
+baltimore_OR = 
+  baltimore_logistic %>% 
+  broom::tidy(conf.int = TRUE) %>% #tidies regression output into dataframe, adds ln confidence intervals
+  janitor::clean_names() %>% #cleans variable names
+  mutate(
+    OR = exp(estimate),
+    conf_low = exp(conf_low),
+    conf_high = exp(conf_high),
+    ) %>% #creates OR variable and exponentiated CIs
+  select(term, OR, conf_low, conf_high) %>% #selects only specified variables
+  filter(term == "victim_sexdbl") %>% #keeps only variables for victim_sex variable
+  knitr::kable(digits = 3) #creates table with resulting data
+
+baltimore_OR #outputs table
+```
+
+As the above table demonstrates, the estimated odds ratio comparing the odds of having a resolved homicide (as opposed to unresolved) in Black or White females from Baltimore, MD was 2.35 times the odds of having a resolved homicide in Black or White males from Baltimore, MD - holding victim age and race constant. We are 95% confident that the true odds ratio comparing resolved status in Black and White females vs. males in Baltimore, MD for this time period lies between 1.794 and 3.085.
+
+
+Now, we run `glm` for each of the cities in the `homicides` dataset, and extract the adjusted odds ratio and CI for solving homicides comparing male victims to female victims. We do this within a “tidy” pipeline, making use of `purrr::map`, list columns, and `unnest` as necessary to create a dataframe with estimated ORs and CIs for each city.
+
+```{r all_cities}
+
 ```
 
 
-For the city of Baltimore, MD, use the glm function to fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. Save the output of glm as an R object; apply the broom::tidy to this object; and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed.
 
-Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing male victims to female victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
+
 
 Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
 
